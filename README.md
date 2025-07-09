@@ -2,6 +2,10 @@
 
 # GeneticBPE: Motif-Preserving Tokenization for Robust miRNA Modeling
 
+**Jaskaran Singh*, Prabhav Sanga*, Arun Kumar Dubey  
+*Contributed equally  
+__Accepted in Proceedings of the ICML 2025 Tokenization Workshop (TokShop), Vancouver, Canada. PMLR 267, 2025.__
+
 GeneticBPE is a biologically-informed tokenization framework that preserves structural motifs in biological sequences while maintaining compression efficiency. This implementation is based on the paper "GeneticBPE: Motif-Preserving Tokenization for Robust miRNA Modeling".
 
 ---
@@ -97,21 +101,9 @@ genetic_bpe/
 
 MIT License
 
-## Authors
-
-Jaskaran Singh*¹², Prabhav Sanga*³², Arun Kumar Dubey⁴²  
-*Equal contribution  
-¹ Department of Computational Biology, Institute 1  
-² Center for Genomic Research, Institute 2  
-³ Department of Computer Science, Institute 3  
-⁴ Department of Bioinformatics, Institute 4
-
 ---
 
-## Publication & Citation
-
-Accepted in: **Proceedings of the ICML 2025 Tokenization Workshop (TokShop)**, Vancouver, Canada. PMLR 267, 2025.  
-Copyright 2025 by the author(s).
+## Citation
 
 If you use GeneticBPE in your research, please cite:
 
