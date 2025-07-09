@@ -1,6 +1,6 @@
 ![GeneticBPE Workflow](assets/img1.png)
 
-# GeneticBPE
+# GeneticBPE: Motif-Preserving Tokenization for Robust miRNA Modeling
 
 GeneticBPE is a biologically-informed tokenization framework that preserves structural motifs in biological sequences while maintaining compression efficiency. This implementation is based on the paper "GeneticBPE: Motif-Preserving Tokenization for Robust miRNA Modeling".
 
