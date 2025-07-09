@@ -6,23 +6,41 @@ import re
 from typing import List, Dict, Set, Optional
 from collections import defaultdict
 from .motif_bank import MotifBank
+import os
+import json
 
 class GeneticBPETokenizer:
-    def __init__(self, vocab_size: int = 1000, min_freq: int = 2):
+    def __init__(self, vocab_size: int = 1000, min_freq: int = 2, config_path: str = None):
         """
         Initialize the GeneticBPE tokenizer.
-        
         Args:
             vocab_size: Maximum size of the vocabulary
             min_freq: Minimum frequency for a token to be included in vocabulary
+            config_path: Path to config file with lambda and mu
         """
         self.vocab_size = vocab_size
         self.min_freq = min_freq
+        self.config_path = config_path or os.path.join(os.path.dirname(__file__), 'genetic_bpe_config.json')
+        self.motif_weight = 2.5
+        self.penalty_weight = 10.0
+        self._load_config()
         self.motif_bank = MotifBank()
         self.vocab = set()
         self.merges = {}
         self.token_frequencies = defaultdict(int)
-        
+
+    def _load_config(self):
+        """Load lambda and mu from config file if present."""
+        if os.path.exists(self.config_path):
+            with open(self.config_path, 'r') as f:
+                config = json.load(f)
+            self.motif_weight = config.get('motif_weight', self.motif_weight)
+            self.penalty_weight = config.get('penalty_weight', self.penalty_weight)
+
+    def reload_config(self):
+        """Reload config at runtime."""
+        self._load_config()
+
     def tokenize(self, sequence: str) -> List[str]:
         """
         Tokenize a miRNA sequence while preserving motifs.
@@ -118,42 +136,75 @@ class GeneticBPETokenizer:
             pair = tokens[i] + tokens[i+1]
             pairs[pair] += 1
         return pairs
-    
-    def train(self, sequences: List[str]):
-        """
-        Train the tokenizer on a list of sequences.
-        
-        Args:
-            sequences: List of miRNA sequences
-        """
+
+    def _get_motif_spans(self, sequence: str):
+        return self.motif_bank.get_motif_spans(sequence)
+
+    def _get_pairs_with_scores(self, sequences: list) -> dict:
+        """Return a dict of pairs and their motif-aware merge scores."""
+        pair_stats = defaultdict(lambda: {'freq': 0, 'bonus': 0, 'penalty': 0})
+        for seq in sequences:
+            tokens = list(seq)
+            motif_spans = self._get_motif_spans(seq)
+            for i in range(len(tokens) - 1):
+                pair = tokens[i] + tokens[i+1]
+                pair_start = i
+                pair_end = i + 2
+                pair_stats[pair]['freq'] += 1
+                if self.motif_bank.is_pair_inside_motif(pair_start, pair_end, motif_spans):
+                    pair_stats[pair]['bonus'] += 1
+                if self.motif_bank.is_pair_crossing_motif_boundary(pair_start, pair_end, motif_spans):
+                    pair_stats[pair]['penalty'] += 1
+        # Compute scores
+        scores = {}
+        for pair, stats in pair_stats.items():
+            score = stats['freq'] + self.motif_weight * stats['bonus'] - self.penalty_weight * stats['penalty']
+            scores[pair] = score
+        return scores
+
+    def train(self, sequences: list):
         # Count token frequencies
         for seq in sequences:
-            tokens = self.tokenize(seq)
+            tokens = list(seq)
             for token in tokens:
                 self.token_frequencies[token] += 1
-        
-        # Build vocabulary
-        self.vocab = {token for token, freq in self.token_frequencies.items() 
-                     if freq >= self.min_freq}
-        
+        self.vocab = {token for token, freq in self.token_frequencies.items() if freq >= self.min_freq}
         # Learn merges
-        while len(self.vocab) < self.vocab_size:
-            # Find most frequent pair
-            pairs = defaultdict(int)
-            for seq in sequences:
-                tokens = self.tokenize(seq)
-                for i in range(len(tokens) - 1):
-                    pair = tokens[i] + tokens[i+1]
-                    pairs[pair] += 1
-            
-            if not pairs:
+        merges = {}
+        current_vocab = set(self.vocab)
+        corpus = [list(seq) for seq in sequences]
+        while len(current_vocab) < self.vocab_size:
+            pair_scores = self._get_pairs_with_scores([''.join(tokens) for tokens in corpus])
+            if not pair_scores:
                 break
-                
-            best_pair = max(pairs.items(), key=lambda x: x[1])[0]
-            self.merges[best_pair] = len(self.merges)
-            
-            # Update vocabulary
-            self.vocab.add(best_pair)
+            best_pair = max(pair_scores.items(), key=lambda x: x[1])[0]
+            # If best_pair has negative score, stop
+            if pair_scores[best_pair] <= 0:
+                break
+            # Merge best_pair in all sequences, but skip merges that would split motifs
+            new_corpus = []
+            for seq in corpus:
+                i = 0
+                new_seq = []
+                motif_spans = self._get_motif_spans(''.join(seq))
+                while i < len(seq):
+                    if i < len(seq) - 1 and seq[i] + seq[i+1] == best_pair:
+                        # Check if merge is allowed (does not split motif)
+                        if self.motif_bank.is_pair_crossing_motif_boundary(i, i+2, motif_spans):
+                            new_seq.append(seq[i])
+                            i += 1
+                        else:
+                            new_seq.append(best_pair)
+                            i += 2
+                    else:
+                        new_seq.append(seq[i])
+                        i += 1
+                new_corpus.append(new_seq)
+            corpus = new_corpus
+            merges[best_pair] = len(merges)
+            current_vocab.add(best_pair)
+        self.merges = merges
+        self.vocab = current_vocab
     
     def save(self, path: str):
         """

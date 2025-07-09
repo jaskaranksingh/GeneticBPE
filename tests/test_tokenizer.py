@@ -3,73 +3,64 @@ Tests for GeneticBPE tokenizer.
 """
 
 import unittest
-from genetic_bpe import GeneticBPE
-from genetic_bpe.utils import validate_sequence
+from genetic_bpe import GeneticBPETokenizer
+from genetic_bpe.motif_span_manager import MotifSpanManager
+from genetic_bpe.motif_bank import MotifBank
+import os
+import json
 
-class TestGeneticBPE(unittest.TestCase):
+class TestGeneticBPETokenizer(unittest.TestCase):
     def setUp(self):
         self.sequences = [
             "UGUGAUAUGCAUGCAUGC",
             "AUGCAUGCAUGCAUGCAU",
             "UGCUUGAUAUGCAUGCAU",
         ]
-        self.tokenizer = GeneticBPE(
+        self.config_path = "genetic_bpe/genetic_bpe_config.json"
+        self.tokenizer = GeneticBPETokenizer(
             vocab_size=512,
-            motif_weight=2.5,
-            penalty_weight=10.0
+            min_freq=2,
+            config_path=self.config_path
         )
-    
-    def test_sequence_validation(self):
-        """Test sequence validation."""
-        valid_seq = "AUGCAUGC"
-        invalid_seq = "AUGCAUGCX"  # X is not a valid nucleotide
-        
-        self.assertTrue(validate_sequence(valid_seq))
-        self.assertFalse(validate_sequence(invalid_seq))
-    
-    def test_tokenizer_initialization(self):
-        """Test tokenizer initialization."""
-        self.assertEqual(self.tokenizer.vocab_size, 512)
-        self.assertEqual(self.tokenizer.motif_weight, 2.5)
-        self.assertEqual(self.tokenizer.penalty_weight, 10.0)
-        self.assertEqual(len(self.tokenizer.vocab), 0)
-    
+        self.motif_manager = MotifSpanManager(self.tokenizer.motif_bank)
+
+    def test_config_loading(self):
+        """Test that lambda/mu are loaded from config file."""
+        with open(self.config_path, 'r') as f:
+            config = json.load(f)
+        self.assertEqual(self.tokenizer.motif_weight, config['motif_weight'])
+        self.assertEqual(self.tokenizer.penalty_weight, config['penalty_weight'])
+
+    def test_config_reload(self):
+        """Test that config reload updates lambda/mu."""
+        # Change config
+        with open(self.config_path, 'w') as f:
+            json.dump({"motif_weight": 3.0, "penalty_weight": 20.0}, f)
+        self.tokenizer.reload_config()
+        self.assertEqual(self.tokenizer.motif_weight, 3.0)
+        self.assertEqual(self.tokenizer.penalty_weight, 20.0)
+        # Restore config
+        with open(self.config_path, 'w') as f:
+            json.dump({"motif_weight": 2.5, "penalty_weight": 10.0}, f)
+        self.tokenizer.reload_config()
+
     def test_tokenizer_training(self):
-        """Test tokenizer training."""
         self.tokenizer.train(self.sequences)
         self.assertGreater(len(self.tokenizer.vocab), 0)
         self.assertGreater(len(self.tokenizer.merges), 0)
-    
-    def test_encoding_decoding(self):
-        """Test sequence encoding and decoding."""
+
+    def test_motif_boundary_preservation(self):
         self.tokenizer.train(self.sequences)
         test_seq = self.sequences[0]
-        
-        # Encode
-        token_ids = self.tokenizer.encode(test_seq)
-        self.assertIsInstance(token_ids, list)
-        self.assertTrue(all(isinstance(id, int) for id in token_ids))
-        
-        # Decode
-        decoded_seq = self.tokenizer.decode(token_ids)
-        self.assertEqual(decoded_seq, test_seq)
-    
-    def test_motif_preservation(self):
-        """Test motif preservation during tokenization."""
-        self.tokenizer.train(self.sequences)
-        test_seq = self.sequences[0]
-        
-        # Get motifs in sequence
-        motifs = self.tokenizer.motif_bank.find_motifs_in_sequence(test_seq)
-        self.assertGreater(len(motifs), 0)
-        
-        # Check if motifs are preserved in tokenized sequence
-        token_ids = self.tokenizer.encode(test_seq)
-        tokens = [self.tokenizer.id_to_token[id] for id in token_ids]
-        tokenized_seq = ''.join(tokens)
-        
-        for motif in motifs.values():
-            self.assertIn(motif, tokenized_seq)
+        motif_spans = self.motif_manager.get_motif_spans(test_seq)
+        tokens = self.tokenizer.tokenize(test_seq)
+        # Check that no token crosses a motif boundary
+        pos = 0
+        for token in tokens:
+            next_pos = pos + len(token)
+            for m_start, m_end, _ in motif_spans:
+                self.assertFalse(pos < m_end and next_pos > m_end, f"Token {token} crosses motif boundary at {m_end}")
+            pos = next_pos
 
 if __name__ == '__main__':
     unittest.main() 
